@@ -24,6 +24,14 @@ dependencies:
   - aeson
   - bytestring
   - text
+  - twitter-conduit
+  - conduit
+  - twitter-types-lens
+  - twitter-types
+  - authenticate-oauth
+  - optparse-applicative
+  - lens
+  - directory
 
 library:
   source-dirs:       src
@@ -35,7 +43,7 @@ ghc-options:
   - -Wredundant-constraints
 
 executables:
-  htwit-scrape:
+  search-tweets:
     main:            Main.hs
     source-dirs:     app
     ghc-options:
