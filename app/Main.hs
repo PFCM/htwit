@@ -7,12 +7,14 @@ import Auth
 import Control.Applicative
 import Control.Exception
 import Control.Lens
+import Control.Monad.IO.Class
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as B
 import Data.Conduit
 import qualified Data.Conduit.List as CL
 import Data.Semigroup ((<>))
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Json
 import Options.Applicative
 import System.Directory (doesFileExist)
@@ -121,17 +123,13 @@ main = do
   twinfo <- getAuth creds mgr (rcfile opts)
   putStrLn "attempting search"
   let searchParams = search opts
-  res <-
-    sourceWithMaxId
-      twinfo
-      mgr
-      (searchTweets (searchTerm searchParams) &
-       lang ?~ (searchLang searchParams) &
-       count ?~ (searchCount searchParams)) $=
-    CL.isolate 10
-  -- putStrLn $ "search completed in: " ++ metadata ^. searchMetadataCompletedIn .
-  --   to show
-  -- putStrLn $ "search result max id: " ++ metadata ^. searchMetadataMaxId .
-  --   to show
-  print . T.unpack . T.unlines . fmap statusText . searchResultStatuses $ res
-  return ()
+  sourceWithMaxId
+    twinfo
+    mgr
+    (searchTweets (searchTerm searchParams) & lang ?~ (searchLang searchParams) &
+     count ?~ (searchCount searchParams)) $=
+    CL.isolate 10 $$
+    CL.mapM_ $ \res ->
+    liftIO $ do
+      T.putStrLn . T.intercalate "\n" . fmap statusText $
+        searchResultStatuses res
