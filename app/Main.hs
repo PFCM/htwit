@@ -9,16 +9,13 @@ import Conduit
 import Control.Applicative
 import Control.Exception
 import Control.Lens
-import Control.Monad.IO.Class
+import Data.Aeson (encode)
 import Data.Aeson.Lens
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as B
-import qualified Data.Conduit.List as CL
 import Data.Semigroup ((<>))
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Options.Applicative
-import System.Directory (doesFileExist)
 import Web.Twitter.Conduit hiding (lookup, search)
 import Web.Twitter.Types
 
@@ -133,9 +130,9 @@ main = do
   let searchParams = search opts
   result <- sourceWithSearchResult' twinfo mgr (makeSearchRequest searchParams)
   let stream = searchResultStatuses result
-  putStr "[\""
+  putStr "["
   runConduit $ stream .| takeC (searchCount searchParams) .|
-    mapC (\v -> v ^. key "full_text" . _String) .|
-    intersperseC "\",\"" .|
-    mapM_C T.putStr
-  putStrLn "\"]"
+    mapC (\v -> encode $ v ^. key "full_text" . _String) .|
+    intersperseC "," .|
+    mapM_C B.putStr
+  putStrLn "]"
