@@ -1,16 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Json
-  ( processTweets
-  ) where
+module Json where
 
 import Control.Applicative
 import Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.Text.Lazy as T
 
-newtype Status = Status
-  { getStatus :: T.Text
+data Status = Status
+  { getStatus :: !T.Text
   } deriving (Show)
 
 newtype Statuses = Statuses
@@ -22,8 +20,7 @@ instance FromJSON Statuses where
   parseJSON _ = empty
 
 instance FromJSON Status where
-  parseJSON (Object v) = Status <$> v .: "text"
-  parseJSON _ = empty
+  parseJSON = withObject "Status" $ \v -> Status <$> v .: "full_text"
 
 instance ToJSON Status where
   toJSON = String . T.toStrict . getStatus

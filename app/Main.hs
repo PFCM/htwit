@@ -1,24 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
 import Auth
+import Conduit
 import Control.Applicative
 import Control.Exception
 import Control.Lens
 import Control.Monad.IO.Class
+import Data.Aeson.Lens
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as B
-import Data.Conduit
 import qualified Data.Conduit.List as CL
 import Data.Semigroup ((<>))
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Json
 import Options.Applicative
 import System.Directory (doesFileExist)
-import Web.Twitter.Conduit hiding (search)
+import Web.Twitter.Conduit hiding (lookup, search)
 import Web.Twitter.Types
 
 -- import Web.Twitter.Types.Lens
@@ -38,7 +39,7 @@ data Options = Options
 
 data SearchParams = SearchParams
   { searchTerm :: T.Text
-  , searchCount :: Integer
+  , searchCount :: Int
   , searchLang :: T.Text
   }
 
@@ -53,6 +54,7 @@ searchParamParser =
   option
     auto
     (long "search_count" <> help "number of statuses per page" <> showDefault <>
+     short 'c' <>
      value 100 <>
      metavar "INT") <*>
   strOption
@@ -77,8 +79,7 @@ makeTwitterOAuth key secret =
 
 oauthCreds :: Parser (Maybe OAuth)
 oauthCreds =
-  optional $
-  makeTwitterOAuth <$>
+  optional $ makeTwitterOAuth <$>
   strOption
     (long "consumer_key" <>
      help "Consumer Key for the twitter app to authenticate as") <*>
@@ -113,23 +114,28 @@ tryReadFile path = do
     Just vals -> return vals
     Nothing -> throw CredentialFileError
 
--- main :: IO ()
--- main = B.interact processTweets
+makeSearchRequest ::
+     SearchParams -> APIRequest SearchTweets (SearchResult [Status])
+makeSearchRequest (SearchParams {..}) =
+  request & params <>~ [extendedTweetsQueryItem]
+  where
+    request = searchTweets searchTerm & lang ?~ searchLang & count ?~ 100
+
+extendedTweetsQueryItem :: APIQueryItem
+extendedTweetsQueryItem = ("tweet_mode", PVString "extended")
+
 main :: IO ()
 main = do
   opts <- execParser cmdOpts
   let creds = auth opts
   mgr <- newManager tlsManagerSettings
   twinfo <- getAuth creds mgr (rcfile opts)
-  putStrLn "attempting search"
   let searchParams = search opts
-  sourceWithMaxId
-    twinfo
-    mgr
-    (searchTweets (searchTerm searchParams) & lang ?~ (searchLang searchParams) &
-     count ?~ (searchCount searchParams)) $=
-    CL.isolate 10 $$
-    CL.mapM_ $ \res ->
-    liftIO $ do
-      T.putStrLn . T.intercalate "\n" . fmap statusText $
-        searchResultStatuses res
+  result <- sourceWithSearchResult' twinfo mgr (makeSearchRequest searchParams)
+  let stream = searchResultStatuses result
+  putStr "[\""
+  runConduit $ stream .| takeC (searchCount searchParams) .|
+    mapC (\v -> v ^. key "full_text" . _String) .|
+    intersperseC "\",\"" .|
+    mapM_C T.putStr
+  putStrLn "\"]"
