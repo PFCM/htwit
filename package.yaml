@@ -45,7 +45,7 @@ ghc-options:
 
 executables:
   search-tweets:
-    main:            Main.hs
+    main:            SearchMain.hs
     source-dirs:     app
     ghc-options:
     - -threaded
