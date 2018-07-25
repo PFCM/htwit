@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
 import Auth
 import Conduit
 import Control.Applicative
+import Control.Concurrent (threadDelay)
 import Control.Exception
 import Control.Lens
 import Data.Aeson (encode)
@@ -16,7 +16,9 @@ import qualified Data.ByteString.Lazy as B
 import Data.Semigroup ((<>))
 import qualified Data.Text as T
 import Options.Applicative
-import Web.Twitter.Conduit hiding (lookup, search)
+import Search
+import Web.Authenticate.OAuth as OA
+import Web.Twitter.Conduit hiding (search)
 import Web.Twitter.Types
 
 -- import Web.Twitter.Types.Lens
@@ -34,19 +36,12 @@ data Options = Options
   , search :: SearchParams
   }
 
-data SearchParams = SearchParams
-  { searchTerm :: T.Text
-  , searchCount :: Int
-  , searchLang :: T.Text
-  }
-
 searchParamParser :: Parser SearchParams
 searchParamParser =
   SearchParams <$>
   strOption
     (long "search_term" <> short 'q' <>
-     help
-       "search terms, space separated ro including twitter search keywords etc." <>
+     help "search terms, space separated including twitter search keywords etc." <>
      metavar "SEARCH") <*>
   option
     auto
@@ -69,14 +64,15 @@ rcPathParser =
 makeTwitterOAuth :: String -> String -> OAuth
 makeTwitterOAuth key secret =
   twitterOAuth
-    { oauthConsumerKey = S8.pack key
-    , oauthConsumerSecret = S8.pack secret
-    , oauthCallback = Nothing
-    }
+  { oauthConsumerKey = S8.pack key
+  , oauthConsumerSecret = S8.pack secret
+  , oauthCallback = Nothing
+  }
 
 oauthCreds :: Parser (Maybe OAuth)
 oauthCreds =
-  optional $ makeTwitterOAuth <$>
+  optional $
+  makeTwitterOAuth <$>
   strOption
     (long "consumer_key" <>
      help "Consumer Key for the twitter app to authenticate as") <*>
@@ -111,15 +107,11 @@ tryReadFile path = do
     Just vals -> return vals
     Nothing -> throw CredentialFileError
 
-makeSearchRequest ::
-     SearchParams -> APIRequest SearchTweets (SearchResult [Status])
-makeSearchRequest (SearchParams {..}) =
-  request & params <>~ [extendedTweetsQueryItem]
-  where
-    request = searchTweets searchTerm & lang ?~ searchLang & count ?~ 100
-
-extendedTweetsQueryItem :: APIQueryItem
-extendedTweetsQueryItem = ("tweet_mode", PVString "extended")
+printStatusStream ::
+     Int -> ConduitT () B.ByteString IO () -> ConduitT () Void IO ()
+printStatusStream delay inputStream =
+  inputStream .| intersperseC "," .|
+  mapM_C (\x -> B.putStr x >> threadDelay delay)
 
 main :: IO ()
 main = do
@@ -129,10 +121,7 @@ main = do
   twinfo <- getAuth creds mgr (rcfile opts)
   let searchParams = search opts
   result <- sourceWithSearchResult' twinfo mgr (makeSearchRequest searchParams)
-  let stream = searchResultStatuses result
+  let statusStream = getStatusStream (searchCount searchParams) result
   putStr "["
-  runConduit $ stream .| takeC (searchCount searchParams) .|
-    mapC (\v -> encode $ v ^. key "full_text" . _String) .|
-    intersperseC "," .|
-    mapM_C B.putStr
+  runConduit . printStatusStream 100 $ statusStream
   putStrLn "]"
