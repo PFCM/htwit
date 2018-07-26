@@ -7,7 +7,7 @@ import Auth
 import Conduit
 import Control.Applicative
 import Control.Concurrent (threadDelay)
-import Control.Exception
+
 import Control.Lens
 import Data.Aeson (encode)
 import Data.Aeson.Lens
@@ -20,14 +20,6 @@ import Search
 import Web.Authenticate.OAuth as OA
 import Web.Twitter.Conduit hiding (search)
 import Web.Twitter.Types
-
--- import Web.Twitter.Types.Lens
-data NoCredentialException
-  = CredentialFileError
-  | AuthError
-  deriving (Show)
-
-instance Exception NoCredentialException
 
 -- the cmd line opts all at once
 data Options = Options
@@ -89,23 +81,6 @@ optionParser = Options <$> oauthCreds <*> rcPathParser <*> searchParamParser
 
 cmdOpts :: ParserInfo Options
 cmdOpts = info (helper <*> optionParser) (fullDesc <> descriptionHeader)
-
-getAuth :: Maybe OAuth -> Manager -> FilePath -> IO TWInfo
-getAuth (Just auth) mgr rcpath = do
-  twinfo <- authorise auth mgr
-  putStrLn $ "Authentication successful, caching results in: " ++ rcpath
-  let creds = twCredential . twToken $ twinfo
-  writeCredentialFile rcpath auth creds
-  return twinfo
-getAuth Nothing _ rcpath = tryReadFile rcpath
-
--- irritatingly partial
-tryReadFile :: FilePath -> IO TWInfo
-tryReadFile path = do
-  creds <- readCredentialFile path
-  case creds of
-    Just vals -> return vals
-    Nothing -> throw CredentialFileError
 
 printStatusStream ::
      Int -> ConduitT () B.ByteString IO () -> ConduitT () Void IO ()

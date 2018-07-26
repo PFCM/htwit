@@ -33,6 +33,7 @@ dependencies:
   - lens
   - lens-aeson
   - directory
+  - resourcet
 
 library:
   source-dirs:       src

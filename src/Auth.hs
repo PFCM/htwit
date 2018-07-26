@@ -1,12 +1,37 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module Auth where
 
+import Control.Exception
 import qualified Data.ByteString.Char8 as S8
 import System.IO (hFlush, stdout)
 import Web.Authenticate.OAuth as OA
-import Web.Twitter.Conduit hiding (lookup, map)
+import Web.Twitter.Conduit hiding (map)
+
+data NoCredentialException
+  = CredentialFileError
+  | AuthError
+  deriving (Show, Exception)
+
+-- instance Exception NoCredentialException
+-- irritatingly partial
+tryReadFile :: FilePath -> IO TWInfo
+tryReadFile path = do
+  creds <- readCredentialFile path
+  case creds of
+    Just vals -> return vals
+    Nothing -> throw CredentialFileError
+
+getAuth :: Maybe OAuth -> Manager -> FilePath -> IO TWInfo
+getAuth (Just auth) mgr rcpath = do
+  twinfo <- authorise auth mgr
+  putStrLn $ "Authentication successful, caching results in: " ++ rcpath
+  let creds = twCredential . twToken $ twinfo
+  writeCredentialFile rcpath auth creds
+  return twinfo
+getAuth Nothing _ rcpath = tryReadFile rcpath
 
 -- try read the file containing credentials and stuff them into the right type
 readCredentialFile :: FilePath -> IO (Maybe TWInfo)
