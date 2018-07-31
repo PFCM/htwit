@@ -1,32 +1,33 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module FilterMain where
 
-import Auth
-import Conduit
-import Control.Applicative
-import Control.Lens ((^.), (^?))
-import Control.Monad.Trans.Resource ()
-import Data.Aeson (Value, encode)
-import Data.Aeson.Lens
-import qualified Data.ByteString.Char8 as S8
-import qualified Data.ByteString.Lazy as B
-import qualified Data.Conduit.List as CL
-import Data.Maybe
-import Data.Semigroup ((<>))
-import qualified Data.Text as T
-import System.IO
-import Options.Applicative
-import Web.Twitter.Conduit
-import Web.Twitter.Types
-import Control.Concurrent.MVar
+import           Auth
+import           Conduit
+import           Control.Applicative
+import           Control.Concurrent.MVar
+import           Control.Lens                 ((^.), (^?))
+import           Control.Monad.Trans.Resource ()
+import           Data.Aeson                   (Value, encode)
+import           Data.Aeson.Lens
+import qualified Data.ByteString.Char8        as S8
+import qualified Data.ByteString.Lazy         as B
+import qualified Data.Conduit.List            as CL
+import           Data.Maybe
+import           Data.Semigroup               ((<>))
+import qualified Data.Text                    as T
+import           Options.Applicative
+import           System.IO
+import           Web.Twitter.Conduit
+import           Web.Twitter.Types
 
 data FilterOptions = FilterOptions
-  { auth :: Maybe OAuth
-  , rcfile :: String
-  , keywords :: [T.Text]
+  { auth      :: Maybe OAuth
+  , rcfile    :: String
+  , keywords  :: [T.Text]
   , numTweets :: Int
+  , maxSecs   :: Int
   } deriving (Show)
 
 keywordsParser :: Parser [T.Text]
@@ -64,12 +65,19 @@ numTweetsParser =
     auto
     (long "num" <> short 'n' <> metavar "INT" <>
      help "how many tweets to grab before exiting" <>
-     value 100)
+     value 10000)
+
+maxSecsParser :: Parser Int
+maxSecsParser =
+  option
+    auto
+    (long "max_secs" <> short 'm' <> metavar "INT" <>
+     help "how many seconds to run for" <> value 600)
 
 optionParser :: Parser FilterOptions
 optionParser =
   FilterOptions <$> authParser <*> rcPathParser <*> keywordsParser <*>
-  numTweetsParser
+  numTweetsParser <*> maxSecsParser
 
 cmdOpts :: ParserInfo FilterOptions
 cmdOpts = info (helper <*> optionParser) (descriptionHeader <> fullDesc)
@@ -93,7 +101,7 @@ fullStatusText :: Value -> B.ByteString
 fullStatusText v =
   case extendedText v of
     "\"\"" -> normalText v
-    x -> x
+    x      -> x
 
 isRetweet :: Value -> Bool
 isRetweet v = isJust rt
@@ -108,16 +116,19 @@ formatCount :: Int -> String
 formatCount c = "\r" ++ show c ++ "  tweets"
 
 
-printCountId :: MVar Int -> a -> IO a
-printCountId count x = do
+printCount :: MVar Int -> a -> IO ()
+printCount count _ = do
   c <- takeMVar count
   let newC = c + 1
   hPutStr stderr . formatCount $ newC
   putMVar count newC
-  return x
+  return ()
 
--- countAndPrint :: Monad m => ConduitT a (IO a) m ()
--- countAndPrint c = let
+-- note hardcoded language, disallowing of retweets
+filterTweetStream :: Monad m => ConduitT () Value m () -> ConduitT () Value m ()
+filterTweetStream c = c .| filterC (not . isRetweet) .| filterC (isLang "en")
+
+
 main :: IO ()
 main = do
   opts <- execParser cmdOpts
@@ -130,10 +141,11 @@ main = do
   runResourceT $ do
     response <-
       stream' twinfo mgr req :: (ResourceT IO) (ConduitT () Value (ResourceT IO) ())
-    runConduit $ response .| filterC (not . isRetweet) .| filterC (isLang "en") .|
+    let rc = filterTweetStream response
+    runConduit $ rc .|
       takeC (numTweets opts) .|
       mapC fullStatusText .|
-      mapMC (lift . printCountId count) .|
+      iterMC (lift . printCount count) .|
       intersperseC "," .|
       mapM_C (lift . B.putStr)
   putStrLn "]"
