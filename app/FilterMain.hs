@@ -16,9 +16,11 @@ import qualified Data.Conduit.List as CL
 import Data.Maybe
 import Data.Semigroup ((<>))
 import qualified Data.Text as T
+import System.IO
 import Options.Applicative
 import Web.Twitter.Conduit
 import Web.Twitter.Types
+import Control.Concurrent.MVar
 
 data FilterOptions = FilterOptions
   { auth :: Maybe OAuth
@@ -101,12 +103,18 @@ isRetweet v = isJust rt
 isLang :: T.Text -> Value -> Bool
 isLang l v = statusLanguage v == l
 
-zipC ::
-     Monad m => ConduitT a b m r -> ConduitT () c m r -> ConduitT a (b, c) m r
-zipC a b = do
-  aVal <- await a
-  bVal <- await b
-  yield (aVal, bVal)
+
+formatCount :: Int -> String
+formatCount c = "\r" ++ show c ++ "  tweets"
+
+
+printCountId :: MVar Int -> a -> IO a
+printCountId count x = do
+  c <- takeMVar count
+  let newC = c + 1
+  hPutStr stderr . formatCount $ newC
+  putMVar count newC
+  return x
 
 -- countAndPrint :: Monad m => ConduitT a (IO a) m ()
 -- countAndPrint c = let
@@ -114,13 +122,19 @@ main :: IO ()
 main = do
   opts <- execParser cmdOpts
   let creds = auth opts
+  count <- newMVar 0
   mgr <- newManager tlsManagerSettings
   twinfo <- getAuth creds mgr (rcfile opts)
   let req = makeFilterRequest . keywords $ opts
+  putStr "["
   runResourceT $ do
     response <-
       stream' twinfo mgr req :: (ResourceT IO) (ConduitT () Value (ResourceT IO) ())
     runConduit $ response .| filterC (not . isRetweet) .| filterC (isLang "en") .|
       takeC (numTweets opts) .|
       mapC fullStatusText .|
-      mapM_C (lift . B.putStrLn)
+      mapMC (lift . printCountId count) .|
+      intersperseC "," .|
+      mapM_C (lift . B.putStr)
+  putStrLn "]"
+  hPutStrLn stderr ""
