@@ -1,33 +1,33 @@
-{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module FilterMain where
 
-import           Auth
-import           Conduit
-import           Control.Applicative
-import           Control.Concurrent.MVar
-import           Control.Lens                 ((^.), (^?))
-import           Control.Monad.Trans.Resource ()
-import           Data.Aeson                   (Value, encode)
-import           Data.Aeson.Lens
-import qualified Data.ByteString.Char8        as S8
-import qualified Data.ByteString.Lazy         as B
-import qualified Data.Conduit.List            as CL
-import           Data.Maybe
-import           Data.Semigroup               ((<>))
-import qualified Data.Text                    as T
-import           Options.Applicative
-import           System.IO
-import           Web.Twitter.Conduit
-import           Web.Twitter.Types
+import Auth
+import Conduit
+import Control.Applicative
+import Control.Concurrent.MVar
+import Control.Lens ((^.), (^?))
+import Control.Monad.Trans.Resource ()
+import Data.Aeson (Value, encode)
+import Data.Aeson.Lens
+import qualified Data.ByteString.Char8 as S8
+import qualified Data.ByteString.Lazy as B
+import qualified Data.Conduit.List as CL
+import Data.Maybe
+import Data.Semigroup ((<>))
+import qualified Data.Text as T
+import Options.Applicative
+import System.IO
+import Web.Twitter.Conduit
+import Web.Twitter.Types
 
 data FilterOptions = FilterOptions
-  { auth      :: Maybe OAuth
-  , rcfile    :: String
-  , keywords  :: [T.Text]
+  { auth :: Maybe OAuth
+  , rcfile :: String
+  , keywords :: [T.Text]
   , numTweets :: Int
-  , maxSecs   :: Int
+  , maxSecs :: Int
   } deriving (Show)
 
 keywordsParser :: Parser [T.Text]
@@ -48,10 +48,10 @@ rcPathParser =
 makeTwitterOAuth :: String -> String -> OAuth
 makeTwitterOAuth key secret =
   twitterOAuth
-  { oauthConsumerKey = S8.pack key
-  , oauthConsumerSecret = S8.pack secret
-  , oauthCallback = Nothing
-  }
+    { oauthConsumerKey = S8.pack key
+    , oauthConsumerSecret = S8.pack secret
+    , oauthCallback = Nothing
+    }
 
 authParser :: Parser (Maybe OAuth)
 authParser =
@@ -72,12 +72,14 @@ maxSecsParser =
   option
     auto
     (long "max_secs" <> short 'm' <> metavar "INT" <>
-     help "how many seconds to run for" <> value 600)
+     help "how many seconds to run for" <>
+     value 600)
 
 optionParser :: Parser FilterOptions
 optionParser =
   FilterOptions <$> authParser <*> rcPathParser <*> keywordsParser <*>
-  numTweetsParser <*> maxSecsParser
+  numTweetsParser <*>
+  maxSecsParser
 
 cmdOpts :: ParserInfo FilterOptions
 cmdOpts = info (helper <*> optionParser) (descriptionHeader <> fullDesc)
@@ -101,7 +103,7 @@ fullStatusText :: Value -> B.ByteString
 fullStatusText v =
   case extendedText v of
     "\"\"" -> normalText v
-    x      -> x
+    x -> x
 
 isRetweet :: Value -> Bool
 isRetweet v = isJust rt
@@ -111,10 +113,8 @@ isRetweet v = isJust rt
 isLang :: T.Text -> Value -> Bool
 isLang l v = statusLanguage v == l
 
-
 formatCount :: Int -> String
 formatCount c = "\r" ++ show c ++ "  tweets"
-
 
 printCount :: MVar Int -> a -> IO ()
 printCount count _ = do
@@ -127,7 +127,6 @@ printCount count _ = do
 -- note hardcoded language, disallowing of retweets
 filterTweetStream :: Monad m => ConduitT () Value m () -> ConduitT () Value m ()
 filterTweetStream c = c .| filterC (not . isRetweet) .| filterC (isLang "en")
-
 
 main :: IO ()
 main = do
@@ -142,9 +141,7 @@ main = do
     response <-
       stream' twinfo mgr req :: (ResourceT IO) (ConduitT () Value (ResourceT IO) ())
     let rc = filterTweetStream response
-    runConduit $ rc .|
-      takeC (numTweets opts) .|
-      mapC fullStatusText .|
+    runConduit $ rc .| takeC (numTweets opts) .| mapC fullStatusText .|
       iterMC (lift . printCount count) .|
       intersperseC "," .|
       mapM_C (lift . B.putStr)

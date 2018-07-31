@@ -1,5 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module SearchMain where
 
@@ -56,10 +56,10 @@ rcPathParser =
 makeTwitterOAuth :: String -> String -> OAuth
 makeTwitterOAuth key secret =
   twitterOAuth
-  { oauthConsumerKey = S8.pack key
-  , oauthConsumerSecret = S8.pack secret
-  , oauthCallback = Nothing
-  }
+    { oauthConsumerKey = S8.pack key
+    , oauthConsumerSecret = S8.pack secret
+    , oauthCallback = Nothing
+    }
 
 oauthCreds :: Parser (Maybe OAuth)
 oauthCreds =
