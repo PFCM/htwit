@@ -17,6 +17,7 @@ import qualified Data.Conduit.List as CL
 import Data.Maybe
 import Data.Semigroup ((<>))
 import qualified Data.Text as T
+import Data.Time.Clock
 import Options.Applicative
 import System.IO
 import Web.Twitter.Conduit
@@ -128,6 +129,35 @@ printCount count _ = do
 filterTweetStream :: Monad m => ConduitT () Value m () -> ConduitT () Value m ()
 filterTweetStream c = c .| filterC (not . isRetweet) .| filterC (isLang "en")
 
+isInTime :: NominalDiffTime -> UTCTime -> IO Bool
+isInTime len start = (<= len) . (`diffUTCTime` start) <$> getCurrentTime
+
+takeWhileMC :: Monad m => (a -> m Bool) -> ConduitT a a m ()
+takeWhileMC f = go
+  where
+    go = do
+      mx <- await
+      case mx of
+        Nothing -> return ()
+        Just x -> do
+          pred <- lift . f $ x
+          case pred of
+            False -> return ()
+            True -> do
+              yield x
+              go
+
+-- myMapMC :: Monad m => (i -> m o) -> ConduitT i o m ()
+-- myMapMC f = go
+--   where
+--     go = do
+--       mx <- await
+--       case mx of
+--         Nothing -> return ()
+--         Just x -> do
+--           val <- lift . f $ x
+--           yield val
+--           go
 main :: IO ()
 main = do
   opts <- execParser cmdOpts
@@ -136,12 +166,16 @@ main = do
   mgr <- newManager tlsManagerSettings
   twinfo <- getAuth creds mgr (rcfile opts)
   let req = makeFilterRequest . keywords $ opts
+  let duration = realToFrac . maxSecs $ opts
   putStr "["
+  startTime <- getCurrentTime
   runResourceT $ do
     response <-
       stream' twinfo mgr req :: (ResourceT IO) (ConduitT () Value (ResourceT IO) ())
     let rc = filterTweetStream response
-    runConduit $ rc .| takeC (numTweets opts) .| mapC fullStatusText .|
+    runConduit $ rc .| takeC (numTweets opts) .|
+      takeWhileMC (\_ -> lift $ isInTime duration startTime) .|
+      mapC fullStatusText .|
       iterMC (lift . printCount count) .|
       intersperseC "," .|
       mapM_C (lift . B.putStr)
